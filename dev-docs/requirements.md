@@ -2,10 +2,22 @@
 See README.md first for high-level feature list and tech stack.
 
 ## Core forwarding functionality
-* Any number of (telegram channel -> recipient address) mappings
-* Each mapping has only one channel and one recipient, but there can be duplicate mapping entries to achieve many-to-many behavior
-* Make a best effort to map message formatting (using @telegraf/entity) and attachments, but prioritize avoiding loss of content
-* end messages with a minimal note containing the source channel name, message timestamp, and link
+* Any number of (Telegram channel -> recipient address) mappings, with no artificial application limit; capacity remains subject to platform quotas
+* Each mapping has one channel and one recipient. Treat mappings independently, including identical duplicate pairs; duplicates can produce duplicate emails
+* Send email from the Google account that deploys the script, to any valid email address (not limited to Gmail)
+* Support public and private channels that the bot can access
+* Forward new channel posts only; do not forward edits or backfill historical posts
+* Make a best effort to map message formatting using `@telegraf/entity`, prioritizing preservation of text and captions
+* Prioritize photos and documents for attachment forwarding
+* Include explicit omission notices for unsupported, oversized, or otherwise unavailable attachments; preserve available text/captions and the source link
+* Avoid email spam from content grouped in Telegram's UI or notifications. Prefer one email per group (including media albums); a rate limit that prioritizes text is an acceptable alternative
+* End emails with a minimal note containing the source channel name, message timestamp, and link. Private-channel links may require channel membership to open
+
+## Delivery behavior
+* Expected usage is low volume, around two Telegram messages per day
+* Best-effort delivery with execution logs is sufficient; persistent delivery retries and exact-once guarantees are not required
+* Log forwarding failures and attachment omissions so they can be diagnosed
+* When global forwarding is off, discard incoming posts rather than queueing them for later delivery
 
 ## Setup Flow
 * User creates Google Apps Script project and deployment using `clasp`, and Telegram bot using BotFather
@@ -14,8 +26,11 @@ See README.md first for high-level feature list and tech stack.
 
 ## Configuration
 * Once initial setup is complete, further configuration can be managed through a Telegram Mini App: mappings, admin list, and global on/off
+* Allow admins to select channels discovered by the bot or manually enter channel IDs/usernames
+* All admins have equal permissions, including adding and removing other admins
+* Prevent removal of the last admin. The initial admin may be removed if another admin remains; Script Properties provide an administrative recovery mechanism
 * Mini App is served through Google Apps Script Web App functionality, minimal but functional
-* Uses Telegram Mini App auth
+* Uses Telegram Mini App authentication, validated on the backend, and checks admin authorization for configuration access and changes
 
 ## General implementation notes
 * Persist all data as Script Properties
