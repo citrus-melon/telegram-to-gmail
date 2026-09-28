@@ -4,7 +4,7 @@
 
 The application runs entirely in Google Apps Script V8. esbuild bundles TypeScript and `@telegraf/entity` into an IIFE with global wrappers for `doPost`, `setup`, `flushPending`, `webhookStatus`, and `recoverAdmin`. No Node runtime APIs or external modules are required. clasp uploads only the bundle and manifest from `dist`.
 
-The Web App executes as the deploying account and permits anonymous access. A generated secret query parameter authenticates requests before body parsing. Apps Script's documented event does not expose arbitrary request headers, so the bot does not depend on Telegram's secret header. The URL is a bearer credential and must stay out of logs. `doPost` returns `HtmlOutput` to avoid Content Service redirects; real acknowledgment behavior must be verified on the actual deployment.
+The Web App executes as the deploying account and permits anonymous access. A generated secret query parameter authenticates requests before body parsing. Apps Script's documented event does not expose arbitrary request headers, so the bot does not depend on Telegram's secret header. The URL is a bearer credential and must stay out of logs. `doPost` returns `HtmlOutput` to avoid Content Service redirects. Developers can check acknowledgment behavior using a deployed bot and `webhookStatus`.
 
 Configuration commands and callbacks require the authenticated sender to be an admin in a private chat. Authorization is rechecked before changes. Commands take arguments; buttons support paginated browsing and expiring, per-admin removal confirmations. There is no Mini App or browser UI.
 
@@ -36,4 +36,4 @@ Photos use the largest variant; documents retain filenames. Attachments download
 
 Structured logs contain categories and update/batch/mapping identifiers, without message bodies, recipient addresses, tokens, or the webhook URL. Telegram/download exceptions are sanitized. `webhookStatus` logs pending count and error presence/timestamp without Telegram's raw URL or error.
 
-Application tests inject ports; runtime tests mock Google globals. Build validation loads the bundle without Node globals. README's live test is a rollout gate: mocked tests cannot establish Telegram acknowledgment behavior, Google permissions, trigger scheduling, or actual email delivery. No live deployment was available during initial implementation.
+Application tests inject ports; runtime tests mock Google globals. Build validation loads the bundle without Node globals. Developers can follow README's live verification checks to exercise Telegram acknowledgments, Google permissions, trigger scheduling, and email delivery against real services.

@@ -3,14 +3,22 @@
 A webhook-based Telegram bot hosted entirely in Google Apps Script. It forwards new channel posts through the deploying account's Gmail to any valid recipient email address.
 
 ## Features
-* Best-effort rich text, with HTML and plain-text email bodies.
-* Photos and documents as attachments; explicit notices for unsupported or unavailable content.
-* One-minute collection windows per channel to combine bursts into one email per mapping.
-* Public and private channels, with independent mappings (including identical duplicates).
-* Admin-only private-chat commands and inline buttons, with global forwarding on/off.
-* Script Properties storage; no Mini App, browser UI, or additional infrastructure.
+### Rich Message Mapping
+* Best-effort mapping of rich text formatting and common non-interactive attachment types
+* Explicit notices for unsupported or unavailable content.
+* One-minute collection windows per channel to combine message bursts and prevent email spam.
+* Best-effort delivery, with 1-2 minute delay
 
-Delivery is best-effort, intended for around two posts per day. Edits and historical posts are not forwarded. Disabling forwarding discards incoming posts and clears pending batches. Telegram groups crossing a collection boundary can produce multiple emails. Delivery normally takes about one to two minutes, but scheduled trigger timing is approximate.
+### Telegram bot configuration interface
+Minimal interface for configuration of:
+* Users permitted to modify configuration
+* Any number of mappings from Telegram channel to recipient address
+* Temporary on/off
+
+### Google Apps Script
+Hosted completely in Google Apps Script; easy setup and no other infrastructure required
+
+
 ## Setup
 
 You need Node.js 22 or newer, pnpm 9.10.0, a Google account with Gmail and Apps Script access, and a Telegram bot created with BotFather. The deploying Google account must also run setup and own the scheduled trigger.
@@ -42,7 +50,7 @@ You need Node.js 22 or newer, pnpm 9.10.0, a Google account with Gmail and Apps 
    | `INITIAL_ADMIN_ID` | Your numeric Telegram user ID, not your username |
    | `WEB_APP_URL` | `https://script.google.com/macros/s/DEPLOYMENT_ID/exec`, without query parameters |
 
-4. Run `setup` in the Apps Script editor as the deploying account. Authorize Gmail, outbound HTTP requests, and trigger management. Setup seeds the admin list, generates `WEBHOOK_SECRET`, registers commands and the webhook, and installs one minute-based `flushPending` trigger. Forwarding starts enabled. Repeating setup preserves configuration and the secret, and does not deliberately drop pending Telegram updates.
+4. Run `setup` in the Apps Script editor as the deploying account. Authorize Gmail, outbound HTTP requests, and trigger management.
 
 5. Open a private chat with the bot and send `/start`. Add the bot to each source channel (usually as an administrator). Use `/channels` after a channel membership update or post, or enter a channel ID/public username:
 
@@ -52,8 +60,6 @@ You need Node.js 22 or newer, pnpm 9.10.0, a Google account with Gmail and Apps 
    ```
 
    The bot verifies channel access before adding a mapping. Existing posts are not imported. Private-channel source links require the recipient to have channel membership.
-
-6. Complete the live verification below before relying on forwarding. Mocked tests do not establish that your deployment receives Telegram webhooks successfully.
 
 Keep bot credentials and the secret webhook URL in Script Properties, out of source files and command-line arguments. Local clasp credentials and project configuration are ignored by Git.
 
@@ -117,9 +123,9 @@ Upload alone updates editor code; the versioned Web App needs redeployment. Reru
 * `pnpm`
 * esbuild and Vitest
 
-## Live verification
+### Live verification
 
-Use a controlled channel and recipient. Live delivery remains unverified until these checks pass:
+Developers can use the following checks with a controlled channel and recipient to exercise a deployed bot, for example after changing webhook handling or forwarding behavior:
 
 1. Verify `/start`, `/status`, and button navigation in an admin's private chat. Verify another user and a group chat cannot configure the bot.
 2. Add a mapping; post formatted text with emoji, a photo, and a document within a minute. Verify text order, attachments, source links, UTC timestamps, and one collected email per mapping.
@@ -127,4 +133,4 @@ Use a controlled channel and recipient. Live delivery remains unverified until t
 4. Remove one duplicate with confirmation. Verify `/cancel`, last-admin protection, and `/off` discarding pending/new posts.
 5. Run `webhookStatus`: pending updates should drain and the error timestamp should not keep advancing. Repeated Telegram delivery should not repeat mutations or emails within the deduplication window.
 
-A successful `setWebhook` call does not prove that Telegram receives successful acknowledgments. Resolve live delivery errors before ongoing use.
+A successful `setWebhook` call confirms registration. Developers can use `webhookStatus` and execution logs to investigate acknowledgment or delivery errors.
