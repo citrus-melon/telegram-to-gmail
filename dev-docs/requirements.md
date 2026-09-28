@@ -18,11 +18,15 @@ See README.md first for high-level feature list and tech stack.
 * Best-effort delivery with execution logs is sufficient; persistent delivery retries and exact-once guarantees are not required
 * Log forwarding failures and attachment omissions so they can be diagnosed
 * When global forwarding is off, discard incoming posts rather than queueing them for later delivery
+* Use a fixed one-minute collection window per channel to reduce burst spam; a minute-based trigger sends completed batches, normally within about one to two minutes
+* Apply current mappings when a batch is claimed for sending. Disabling forwarding clears pending batches but cannot recall claimed deliveries
+* Deduplicate recently processed Telegram updates on a best-effort basis, independently of intentionally duplicated mappings
 
 ## Setup Flow
 * User creates Google Apps Script project and deployment using `clasp`, and Telegram bot using BotFather
     * Google Apps Script Web App deployment as webhook endpoint, running as the deploying account and accessible to Telegram without Google sign-in
 * User provides bot token and initial admin Telegram user id as Script Properties
+* User also provides the deployed Web App URL as a Script Property; setup generates the webhook secret
 * User triggers an initial Google Apps Script action to complete Telegram bot setup, including webhook registration and bot command registration
 
 ## Configuration
@@ -34,6 +38,8 @@ See README.md first for high-level feature list and tech stack.
 * Prevent removal of the last admin. The initial admin may be removed if another admin remains; Script Properties provide an administrative recovery mechanism
 * Authenticate configuration requests using the sender's Telegram user ID from validated webhook updates; check current admin authorization on every configuration command, callback, and conversational input
 * Keep the interface minimal but functional, with clear success/error responses and a way to cancel any multi-step interaction
+* Use commands with arguments for entering mappings and admin IDs; use inline buttons for paginated lists and removal confirmations
+* Configuration is available only in authorized admins' private chats, with no Mini App or browser interface
 
 ## General implementation notes
 * Persist all data as Script Properties

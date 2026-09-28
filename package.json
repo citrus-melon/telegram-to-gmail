@@ -1,0 +1,23 @@
+{
+  "name": "telegram-to-gmail",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.10.0",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "node scripts/build.mjs && node scripts/check-bundle.mjs",
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "upload": "pnpm build && clasp push",
+    "clasp": "clasp"
+  },
+  "dependencies": { "@telegraf/entity": "^0.7.0" },
+  "devDependencies": {
+    "@google/clasp": "^3.0.0",
+    "@types/google-apps-script": "^2.0.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}
