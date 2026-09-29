@@ -54,4 +54,4 @@ Subjects use the first nonempty text/caption line in message-ID order, channel n
 
 Structured logs contain categories and update/batch/mapping identifiers, without message bodies, recipient addresses, tokens, or the webhook URL. Telegram/download exceptions are sanitized. `webhookStatus` logs pending count and error presence/timestamp without Telegram's raw URL or error.
 
-Application tests inject ports; runtime tests mock Google globals. Build validation loads the bundle without Node globals. Developers can follow README's live verification checks to exercise Telegram acknowledgments, Google permissions, trigger scheduling, and email delivery against real services.
+Application tests inject ports; runtime tests mock Google globals. Build validation loads the bundle without Node globals. Developers can follow [live verification checks](development.md#live-verification) to exercise Telegram acknowledgments, Google permissions, trigger scheduling, and email delivery against real services.
