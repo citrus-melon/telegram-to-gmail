@@ -50,6 +50,16 @@ export class BotService {
     return state;
   }
 
+  private nextFlush(state: State): number | null {
+    return state.enabled && state.batches.length
+      ? Math.min(...state.batches.map(batch => batch.openedAt + WINDOW_MS)) : null;
+  }
+
+  private syncFlush(state: State, firingId?: string): void {
+    try { this.ports.syncFlush(this.nextFlush(state), firingId); }
+    catch { this.ports.log('flush_schedule_failed'); }
+  }
+
   setup(): void {
     const p = this.ports.properties;
     const token = p.getProperty('BOT_TOKEN');
@@ -70,7 +80,7 @@ export class BotService {
       allowed_updates: ['channel_post', 'message', 'callback_query', 'my_chat_member'],
       drop_pending_updates: false,
     });
-    this.ports.ensureTrigger();
+    this.ports.locked(() => this.ports.syncFlush(this.nextFlush(this.state())));
     this.ports.log('setup_complete');
   }
 
@@ -98,6 +108,10 @@ export class BotService {
     } catch {
       // Do not expose Telegram response bodies or token-bearing fetch exceptions to execution logs.
       this.ports.log('update_failed', { updateId: update.update_id });
+    } finally {
+      // Also repairs missing schedules after repeated updates or an earlier scheduling failure.
+      try { this.ports.locked(() => this.syncFlush(this.state())); }
+      catch { this.ports.log('flush_schedule_failed'); }
     }
   }
 
@@ -286,27 +300,38 @@ export class BotService {
     return { text: `${kind === 'm' ? 'Mappings' : kind === 'c' ? 'Channels' : 'Admins'} (${page + 1}/${pages})\n\n${lines.join('\n\n') || 'No entries.'}`, buttons };
   }
 
-  flush(): void {
+  flush(firingId?: string): void {
     // Claim one batch at a time so a slow download cannot claim the entire backlog before a runtime timeout.
     const deadline = this.ports.now() + 4 * 60_000;
-    while (this.ports.now() < deadline) {
-      const claimed = this.ports.locked(() => {
-        const state = this.state();
-        if (!state.enabled) {
-          if (state.batches.length) { state.batches = []; this.store.write(state); }
-          return null;
-        }
-        const batch = state.batches.find(b => b.openedAt + WINDOW_MS <= this.ports.now());
-        if (!batch) return null;
-        const mappings = state.mappings.filter(m => m.channelId === batch.channelId);
-        state.batches = state.batches.filter(b => b.id !== batch.id);
-        this.store.write(state);
-        return { batch, mappings };
-      });
-      if (!claimed) break;
-      if (!claimed.mappings.length) { this.ports.log('batch_unmapped', { batchId: claimed.batch.id }); continue; }
-      try { deliver(claimed.batch as Batch, claimed.mappings, this.ports); }
-      catch { this.ports.log('batch_failed', { batchId: claimed.batch.id }); }
+    try {
+      while (this.ports.now() < deadline) {
+        const claimed = this.ports.locked(() => {
+          const state = this.state();
+          if (!state.enabled) {
+            if (state.batches.length) { state.batches = []; this.store.write(state); }
+            this.syncFlush(state, firingId); firingId = undefined;
+            return null;
+          }
+          const batch = state.batches.find(b => b.openedAt + WINDOW_MS <= this.ports.now());
+          if (!batch) {
+            this.syncFlush(state, firingId); firingId = undefined;
+            return null;
+          }
+          const mappings = state.mappings.filter(m => m.channelId === batch.channelId);
+          state.batches = state.batches.filter(b => b.id !== batch.id);
+          this.store.write(state);
+          // Keep a successor scheduled before sending: later/unclaimed batches survive worker timeouts.
+          this.syncFlush(state, firingId); firingId = undefined;
+          return { batch, mappings };
+        });
+        if (!claimed) break;
+        if (!claimed.mappings.length) { this.ports.log('batch_unmapped', { batchId: claimed.batch.id }); continue; }
+        try { deliver(claimed.batch as Batch, claimed.mappings, this.ports); }
+        catch { this.ports.log('batch_failed', { batchId: claimed.batch.id }); }
+      }
+    } finally {
+      try { this.ports.locked(() => this.syncFlush(this.state(), firingId)); }
+      catch { this.ports.log('flush_schedule_failed'); }
     }
   }
 }

@@ -21,7 +21,9 @@ See README.md first for high-level feature list and tech stack.
 * Best-effort delivery with execution logs is sufficient; persistent delivery retries and exact-once guarantees are not required
 * Log forwarding failures and attachment omissions so they can be diagnosed
 * When global forwarding is off, discard incoming posts rather than queueing them for later delivery
-* Use a fixed one-minute collection window per channel to reduce burst spam; a minute-based trigger sends completed batches, normally within about one to two minutes
+* Use a fixed one-minute collection window per channel to reduce burst spam; schedule a one-shot flush for the earliest pending batch. Reuse that schedule across the burst and leave no periodic idle trigger; actual trigger timing may be delayed by Apps Script
+* Cancel scheduled work when forwarding is disabled; keep a successor scheduled for remaining batches and posts received during delivery
+* Preserve queued content on scheduling failures, log the failure, and allow repair through later webhook updates or manual setup/flush actions
 * Apply current mappings when a batch is claimed for sending. Disabling forwarding clears pending batches but cannot recall claimed deliveries
 * Deduplicate recently processed Telegram updates on a best-effort basis, independently of intentionally duplicated mappings
 

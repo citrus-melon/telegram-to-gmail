@@ -11,9 +11,12 @@ function install() {
     if (url.endsWith('/getWebhookInfo')) return response({ ok: true, result: { url: 'SECRET URL', pending_update_count: 0, last_error_date: 1, last_error_message: 'SECRET ERROR' } });
     return response({ ok: true, result: true });
   });
-  const triggers: Array<{ getHandlerFunction(): string }> = [{ getHandlerFunction: () => 'flushPending' }, { getHandlerFunction: () => 'flushPending' }, { getHandlerFunction: () => 'unrelated' }];
-  const create = vi.fn(() => { triggers.push({ getHandlerFunction: () => 'flushPending' }); });
-  const everyMinutes = vi.fn(() => ({ create }));
+  type Trigger = { getHandlerFunction(): string; getUniqueId(): string };
+  const trigger = (id: string, handler = 'flushPending'): Trigger => ({ getHandlerFunction: () => handler, getUniqueId: () => id });
+  const triggers: Trigger[] = [trigger('orphan-1'), trigger('orphan-2'), trigger('other', 'unrelated')];
+  let serial = 0;
+  const create = vi.fn(() => { const t = trigger(`new-${++serial}`); triggers.push(t); return t; });
+  const after = vi.fn((_delay: number) => ({ create }));
   vi.stubGlobal('PropertiesService', { getScriptProperties: () => h.properties });
   vi.stubGlobal('LockService', { getScriptLock: () => ({ waitLock: vi.fn(), releaseLock: vi.fn() }) });
   const formatDate = vi.fn(() => 'Sep 28, 2026, 2:30 PM PDT');
@@ -23,14 +26,14 @@ function install() {
   vi.stubGlobal('GmailApp', { sendEmail: vi.fn() });
   vi.stubGlobal('ScriptApp', {
     getProjectTriggers: () => [...triggers],
-    deleteTrigger: (t: { getHandlerFunction(): string }) => triggers.splice(triggers.indexOf(t), 1),
-    newTrigger: vi.fn(() => ({ timeBased: () => ({ everyMinutes }) })),
+    deleteTrigger: (t: Trigger) => triggers.splice(triggers.indexOf(t), 1),
+    newTrigger: vi.fn(() => ({ timeBased: () => ({ after }) })),
   });
   const htmlOutput = { html: 'OK' };
   const createHtmlOutput = vi.fn(() => htmlOutput);
   vi.stubGlobal('HtmlService', { createHtmlOutput });
   const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-  return { h, fetch, triggers, create, everyMinutes, htmlOutput, createHtmlOutput, log, formatDate };
+  return { h, fetch, triggers, create, after, htmlOutput, createHtmlOutput, log, formatDate };
 }
 
 function response(data: unknown, status = 200) {
@@ -38,12 +41,25 @@ function response(data: unknown, status = 200) {
 }
 
 describe('Apps Script runtime adapters', () => {
-  it('exposes setup, leaves exactly one owned trigger, and preserves unrelated triggers', () => {
+  it('setup clears abandoned flush triggers without scheduling idle work and preserves unrelated triggers', () => {
     const r = install(); setup(); setup();
-    expect(r.triggers.filter(t => t.getHandlerFunction() === 'flushPending')).toHaveLength(1);
+    expect(r.triggers.filter(t => t.getHandlerFunction() === 'flushPending')).toHaveLength(0);
     expect(r.triggers.filter(t => t.getHandlerFunction() === 'unrelated')).toHaveLength(1);
-    expect(r.everyMinutes).toHaveBeenCalledWith(1);
+    expect(r.after).not.toHaveBeenCalled();
     expect(r.fetch).toHaveBeenCalledWith(expect.stringContaining('/setWebhook'), expect.objectContaining({ method: 'post' }));
+  });
+  it('schedules one-shot work from a webhook and consumes its trigger ID on flush', () => {
+    const r = install(); setup(); r.h.command('/addmapping @news a@example.com');
+    const send = (id: number) => doPost({ parameter: { secret: r.h.properties.getProperty('WEBHOOK_SECRET')! }, postData: { contents: JSON.stringify({ update_id: id, channel_post: { message_id: id, date: 10, chat: { id: -10012345, type: 'channel', title: 'News' }, text: 'Post' } }) } } as unknown as GoogleAppsScript.Events.DoPost);
+    send(20); send(21);
+    expect(r.create).toHaveBeenCalledTimes(1);
+    expect(r.after.mock.calls[0][0]).toBeGreaterThan(59_000);
+    const id = r.triggers.find(t => t.getHandlerFunction() === 'flushPending')!.getUniqueId();
+    r.h.mutate(s => { s.batches[0].openedAt = Date.now() - 120_000; });
+    flushPending({ triggerUid: id });
+    expect(GmailApp.sendEmail).toHaveBeenCalledTimes(1);
+    expect(r.triggers.filter(t => t.getHandlerFunction() === 'flushPending')).toHaveLength(0);
+    expect(r.h.properties.getProperty('FLUSH_SCHEDULE')).toBeNull();
   });
   it('returns a direct HTML acknowledgment and rejects invalid secrets without outgoing requests', () => {
     const r = install();

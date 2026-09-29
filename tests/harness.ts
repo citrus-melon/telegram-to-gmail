@@ -48,7 +48,7 @@ export function harness() {
       emails.push(email);
     }),
     log: vi.fn(),
-    ensureTrigger: vi.fn(),
+    syncFlush: vi.fn(),
   };
   const bot = new BotService(ports);
   bot.setup();

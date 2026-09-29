@@ -72,5 +72,5 @@ export interface Ports {
   download(file: FileInfo, name: string): Attachment;
   send(email: Email): void;
   log(event: string, details?: Record<string, string | number | boolean>): void;
-  ensureTrigger(): void;
+  syncFlush(dueAt: number | null, firingId?: string): void;
 }

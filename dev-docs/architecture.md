@@ -10,13 +10,17 @@ The Web App executes as the deploying account and permits anonymous access. A ge
 
 Configuration commands and callbacks require the authenticated sender to be an admin in a private chat. Authorization is rechecked before changes. Commands take arguments; buttons support paginated browsing and expiring, per-admin removal confirmations. There is no Mini App or browser UI.
 
-`setup` seeds state only once, preserves the secret, registers explicit update subscriptions and commands, and recreates only the current account's `flushPending` triggers to ensure one minute-based trigger. Setup and deployment must use the same account. `recoverAdmin` is an editor-only recovery function, not a bot operation.
+`setup` seeds state only once, preserves the secret, and registers explicit update subscriptions and commands. It reconciles pending work with the current account's flush triggers, preserving a matching schedule and creating a one-shot trigger only when needed. Setup and deployment must use the same account. `recoverAdmin` is an editor-only recovery function, not a bot operation.
 
 ### Scheduling tradeoff
 
-The recurring trigger is retained for implementation simplicity. It runs about 1,440 times per day and reads the pointer plus state chunks when idle: roughly 2,880 property reads per day for a one-chunk state. Idle flushes perform no state writes, downloads, or email/API calls. Runtime usage depends on actual execution durations, which developers can inspect in Apps Script execution history.
+The bot uses on-demand scheduling to eliminate periodic idle executions. A minute-based poll runs about 1,440 times per day; at one second per execution, this costs 24 minutes of daily trigger runtime even without messages. One-shot triggers instead run when queued batches need processing. Developers can inspect actual runtime usage in Apps Script execution history.
 
-On-demand scheduling would avoid idle executions but require coordination of pending triggers and later batches, cancellation/cleanup, and recovery from scheduling failures. Those paths add complexity at this project's expected volume. The recurring trigger also naturally checks pending work again after a transient pre-claim failure; claimed deliveries remain best-effort without retries.
+After authenticated webhook processing, the scheduler reconciles queued work under the script lock. `FLUSH_SCHEDULE` stores the trigger ID and intended earliest batch deadline separately from chunked application state. The scheduler reuses a matching live trigger, repairs missing/corrupt metadata or externally removed triggers, and removes stale duplicates. A replacement is recorded before deleting a known pending trigger so creation failure can leave its previous wakeup intact. When no work remains, owned flush triggers and scheduling metadata are removed. Unrelated handlers are untouched.
+
+The trigger event's `triggerUid` is passed through the generated wrapper to the worker. A firing trigger is consumed rather than reused, even if it fires early. A stale invocation preserves a newer valid schedule. Before sending each claimed batch, the worker schedules remaining batches so a runtime timeout does not strand unclaimed work. New posts reconcile their own schedules, and worker exit reconciles again against current state, avoiding lost wakeups or cancellation of newer work. There can be a transient replacement trigger or a redundant invocation racing with cancellation; claims still prevent duplicate batch delivery.
+
+Scheduling failures are logged as `flush_schedule_failed` without discarding queued content. A later authenticated update, repeated setup, or manual flush can repair the schedule. No periodic watchdog or persistent delivery retries are introduced. Scheduling/Properties failures or a crash before scheduling commits can leave queued work awaiting one of these recovery actions.
 
 Google currently lists 50,000 daily property operations and 90 minutes of total trigger runtime for consumer accounts; limits can change and are shared with other work under the account. See [Apps Script quotas](https://developers.google.com/apps-script/guides/services/quotas). An on-demand trigger's `after` delay is a minimum, not an exact execution time; see [ClockTriggerBuilder](https://developers.google.com/apps-script/reference/script/clock-trigger-builder#afterdurationmilliseconds).
 
@@ -26,7 +30,7 @@ All persistent state resides in Script Properties. `STATE_POINTER` identifies `S
 
 Chunks are at most 7,500 UTF-8 bytes. Under a script lock, the storage helper removes abandoned generations, checks a conservative 450,000-byte budget including property keys and existing data, writes new chunks, and commits by switching the pointer. It then deletes old chunks. Pre-commit failures retain the previous state. Old and new generations temporarily coexist, reducing usable capacity below the platform total; this is not historical backup storage.
 
-`LockService` protects state decisions and mutations. External APIs, downloads, and Gmail calls occur outside locks. Channel lookup checks admin authorization first, then resolves externally and rechecks authorization/deduplication before committing. State changes and their processed update IDs are saved together. Deduplication is bounded and not an exact-once guarantee.
+`LockService` protects state decisions and mutations. Trigger reconciliation is also performed under the lock to serialize scheduling with queue decisions. Telegram APIs, downloads, and Gmail calls remain outside locks. Channel lookup checks admin authorization first, then resolves externally and rechecks authorization/deduplication before committing. State changes and their processed update IDs are saved together. Deduplication is bounded and not an exact-once guarantee.
 
 ## Collection and email
 

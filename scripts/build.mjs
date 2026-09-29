@@ -19,7 +19,7 @@ await build({
   footer: { js: `
 function doPost(e) { return Bot.doPost(e); }
 function setup() { return Bot.setup(); }
-function flushPending() { return Bot.flushPending(); }
+function flushPending(e) { return Bot.flushPending(e); }
 function webhookStatus() { return Bot.webhookStatus(); }
 function recoverAdmin() { return Bot.recoverAdmin(); }
 ` },

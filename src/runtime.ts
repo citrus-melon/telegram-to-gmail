@@ -1,6 +1,7 @@
 import { BotService } from './bot';
 import { FILE_BUDGET } from './forwarding';
 import type { Attachment, FileInfo, Ports } from './types';
+import { FlushScheduler } from './scheduling';
 export { projectDetails } from './project';
 
 function telegram<T>(method: string, payload: Record<string, unknown> = {}): T {
@@ -53,11 +54,19 @@ function ports(): Ports {
       });
     },
     log(event, details = {}) { console.log(JSON.stringify({ event, ...details })); },
-    ensureTrigger() {
-      const triggers = ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === 'flushPending');
-      // Recreate the trigger to ensure its interval is correct. Only this handler's triggers are touched.
-      triggers.forEach(t => ScriptApp.deleteTrigger(t));
-      ScriptApp.newTrigger('flushPending').timeBased().everyMinutes(1).create();
+    syncFlush(dueAt, firingId) {
+      const owned = ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === 'flushPending');
+      const scheduler = new FlushScheduler(PropertiesService.getScriptProperties(), {
+        list: () => owned.map(t => t.getUniqueId()),
+        create: delay => ScriptApp.newTrigger('flushPending').timeBased().after(delay).create().getUniqueId(),
+        remove: id => {
+          const trigger = owned.find(t => t.getUniqueId() === id);
+          // A freshly created trigger may need cleanup if recording its ID fails.
+          const found = trigger || ScriptApp.getProjectTriggers().find(t => t.getHandlerFunction() === 'flushPending' && t.getUniqueId() === id);
+          if (found) ScriptApp.deleteTrigger(found);
+        },
+      }, () => Date.now());
+      scheduler.sync(dueAt, firingId);
     },
   };
 }
@@ -67,7 +76,7 @@ export function doPost(event: GoogleAppsScript.Events.DoPost): GoogleAppsScript.
   return HtmlService.createHtmlOutput('OK');
 }
 export function setup(): void { new BotService(ports()).setup(); }
-export function flushPending(): void { new BotService(ports()).flush(); }
+export function flushPending(event?: { triggerUid?: string }): void { new BotService(ports()).flush(event?.triggerUid); }
 export function recoverAdmin(): void { new BotService(ports()).recoverAdmin(); }
 export function webhookStatus(): void {
   const info = telegram<{ pending_update_count: number; last_error_date?: number; last_error_message?: string }>('getWebhookInfo');

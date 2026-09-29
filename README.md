@@ -9,7 +9,7 @@ A webhook-based Telegram bot hosted entirely in Google Apps Script. It forwards 
 * Message text in subject line
 * Channel name/timestamp and link to original message in footer
 * One-minute collection windows per channel to combine message bursts and prevent email spam.
-* Best-effort delivery, with 1-2 minute delay
+* Best-effort delivery after the collection window ends, with on-demand scheduling and no periodic idle executions
 
 ### Telegram bot configuration interface
 Minimal interface for configuration of:
@@ -52,7 +52,7 @@ You need Node.js 22 or newer, pnpm 9.10.0, a Google account with Gmail and Apps 
    | `INITIAL_ADMIN_ID` | Your numeric Telegram user ID, not your username |
    | `WEB_APP_URL` | `https://script.google.com/macros/s/DEPLOYMENT_ID/exec`, without query parameters |
 
-4. Run `setup` in the Apps Script editor as the deploying account. Authorize Gmail, outbound HTTP requests, and trigger management. Timestamps follow the Apps Script project time zone. The manifest defaults to `Etc/UTC`; change `timeZone` in the local `appsscript.json` and redeploy to persist your preference across uploads. Changing the time zone only in the editor can be overwritten by a later upload.
+4. Run `setup` in the Apps Script editor as the deploying account. Authorize Gmail, outbound HTTP requests, and trigger management. Setup schedules pending content only when needed; an idle bot has no flush trigger. Timestamps follow the Apps Script project time zone. The manifest defaults to `Etc/UTC`; change `timeZone` in the local `appsscript.json` and redeploy to persist your preference across uploads. Changing the time zone only in the editor can be overwritten by a later upload.
 
 5. Open a private chat with the bot and send `/start`. Add the bot to each source channel (usually as an administrator). Use `/channels` after a channel membership update or post, or enter a channel ID/public username:
 
@@ -92,6 +92,10 @@ The bot displays the largest Telegram photo variant inline in the HTML email. Do
 Check **Executions** for structured events such as `update_failed`, `configuration_save_failed`, `content_omitted`, `email_failed`, and `email_sent`. Logs contain identifiers and outcomes, without credentials or full message bodies. A completed execution can still contain logged delivery failures. Failed recipients and claimed batches are not retried.
 
 Run `webhookStatus` in the editor to log pending update count and error presence/timestamp, excluding the secret URL and raw error text. If `/start` gets no response, check deployment access, authorization, token, and `WEB_APP_URL`, then rerun `setup`. For missing email, check mappings, global state, the trigger, sender authorization, and email quota.
+
+The bot creates a one-shot `flushPending` trigger for the earliest pending batch and reuses it for further posts in that window. After a flush, it schedules remaining work or removes the trigger when the queue is empty. `/off` clears pending work and cancels its trigger. Apps Script's trigger delay is a minimum, so delivery can take longer than the one-minute collection window. No periodic trigger runs while idle. See [ClockTriggerBuilder timing](https://developers.google.com/apps-script/reference/script/clock-trigger-builder#afterdurationmilliseconds).
+
+If logs show `flush_schedule_failed`, queued content is retained. Later authenticated webhook updates attempt to repair scheduling; you can also run `setup` or `flushPending` in the editor. There is no periodic recovery poll. An idle bot having no trigger is normal, but pending batches with no trigger can indicate a scheduling failure.
 
 State uses versioned chunks and an atomic generation pointer. Failed pre-commit saves retain the committed configuration. Keeping old and new generations during a save consumes extra storage, so usable capacity is below the Properties total limit. If capacity is reached, let pending batches flush and remove unused entries; inspect logs for discarded updates.
 
@@ -134,5 +138,6 @@ Developers can use the following checks with a controlled channel and recipient 
 3. Post unsupported content and verify an omission notice. Add an identical mapping and verify two independent emails for the next batch.
 4. Remove one duplicate with confirmation. Verify `/cancel`, last-admin protection, and `/off` discarding pending/new posts.
 5. Run `webhookStatus`: pending updates should drain and the error timestamp should not keep advancing. Repeated Telegram delivery should not repeat mutations or emails within the deduplication window.
+6. Inspect Apps Script's triggers: a burst should share one pending flush trigger, and the bot should have none after its queue drains. Check that `/off` cancels it and posts arriving during delivery get a subsequent scheduled flush.
 
 A successful `setWebhook` call confirms registration. Developers can use `webhookStatus` and execution logs to investigate acknowledgment or delivery errors.

@@ -11,7 +11,7 @@ describe('setup and webhook authorization', () => {
     expect(h.store.read()).toMatchObject({ enabled: false, admins: ['43'], mappings: [{ recipient: 'user@example.com' }] });
     expect(h.properties.getProperty('WEBHOOK_SECRET')).toBe(secret);
     expect(h.api).toHaveBeenCalledWith('setWebhook', expect.objectContaining({ max_connections: 1, drop_pending_updates: false, allowed_updates: ['channel_post', 'message', 'callback_query', 'my_chat_member'] }));
-    expect(h.ports.ensureTrigger).toHaveBeenCalledTimes(2);
+    expect(h.ports.syncFlush).toHaveBeenLastCalledWith(null);
   });
   it('validates setup values and supports recovery without replacing admins', () => {
     const h = harness();
