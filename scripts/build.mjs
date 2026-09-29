@@ -1,5 +1,8 @@
 import { build } from 'esbuild';
-import { mkdir, copyFile } from 'node:fs/promises';
+import { mkdir, copyFile, readFile } from 'node:fs/promises';
+import { buildMetadata, metadataBanner } from './metadata.mjs';
+
+const metadata = buildMetadata(JSON.parse(await readFile('package.json', 'utf8')));
 
 await mkdir('dist', { recursive: true });
 await build({
@@ -11,6 +14,8 @@ await build({
   platform: 'neutral',
   mainFields: ['module', 'main'],
   target: 'es2020',
+  banner: { js: metadataBanner(metadata) },
+  define: { __BUILD_METADATA__: JSON.stringify(metadata) },
   footer: { js: `
 function doPost(e) { return Bot.doPost(e); }
 function setup() { return Bot.setup(); }

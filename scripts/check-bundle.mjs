@@ -10,4 +10,11 @@ for (const entrypoint of ['doPost', 'setup', 'flushPending', 'webhookStatus', 'r
   assert.equal(typeof context[entrypoint], 'function', `Missing global entrypoint: ${entrypoint}`);
 }
 assert.equal(context.require, undefined);
-console.log('Apps Script bundle loads without Node globals; all entrypoints are available.');
+assert.ok(source.startsWith('// Generated file; edit src/'), 'Missing leading generated-file comment');
+const helpInfo = context.Bot.projectDetails();
+for (const line of source.split('\n')) {
+  if (!line.startsWith('//')) break;
+  const field = /^\/\/ (?:Project|Description|Version|Revision|Repository): (.*)$/.exec(line);
+  if (field) assert.ok(helpInfo.includes(field[1]), 'Bundle banner and bot help metadata differ');
+}
+console.log('Apps Script bundle loads without Node globals; entrypoints and shared project metadata are verified.');

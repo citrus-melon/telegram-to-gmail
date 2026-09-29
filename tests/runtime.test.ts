@@ -16,7 +16,9 @@ function install() {
   const everyMinutes = vi.fn(() => ({ create }));
   vi.stubGlobal('PropertiesService', { getScriptProperties: () => h.properties });
   vi.stubGlobal('LockService', { getScriptLock: () => ({ waitLock: vi.fn(), releaseLock: vi.fn() }) });
-  vi.stubGlobal('Utilities', { getUuid: h.ports.uuid });
+  const formatDate = vi.fn(() => 'Sep 28, 2026, 2:30 PM PDT');
+  vi.stubGlobal('Utilities', { getUuid: h.ports.uuid, formatDate });
+  vi.stubGlobal('Session', { getScriptTimeZone: () => 'America/Los_Angeles' });
   vi.stubGlobal('UrlFetchApp', { fetch });
   vi.stubGlobal('GmailApp', { sendEmail: vi.fn() });
   vi.stubGlobal('ScriptApp', {
@@ -28,7 +30,7 @@ function install() {
   const createHtmlOutput = vi.fn(() => htmlOutput);
   vi.stubGlobal('HtmlService', { createHtmlOutput });
   const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-  return { h, fetch, triggers, create, everyMinutes, htmlOutput, createHtmlOutput, log };
+  return { h, fetch, triggers, create, everyMinutes, htmlOutput, createHtmlOutput, log, formatDate };
 }
 
 function response(data: unknown, status = 200) {
@@ -63,6 +65,8 @@ describe('Apps Script runtime adapters', () => {
     r.h.mutate(s => { s.batches[0].openedAt = Date.now() - 120_000; });
     flushPending();
     expect(GmailApp.sendEmail).toHaveBeenCalledWith('a@example.com', expect.any(String), expect.stringContaining('hello'), expect.objectContaining({ htmlBody: expect.stringContaining('View source post') }));
+    expect(r.formatDate).toHaveBeenCalledWith(new Date(10_000), 'America/Los_Angeles', 'MMM d, yyyy, h:mm a z');
+    expect(GmailApp.sendEmail).toHaveBeenCalledWith(expect.any(String), expect.any(String), expect.stringContaining('Sep 28, 2026, 2:30 PM PDT'), expect.objectContaining({ htmlBody: expect.stringContaining('Sep 28, 2026, 2:30 PM PDT') }));
     r.h.mutate(s => { s.admins = ['43']; }); recoverAdmin();
     expect(r.h.store.read()?.admins).toEqual(['43', '42']);
   });
@@ -81,5 +85,21 @@ describe('Apps Script runtime adapters', () => {
     expect(blob.setName).toHaveBeenCalledWith('report.pdf');
     expect(GmailApp.sendEmail).toHaveBeenCalledWith(expect.any(String), expect.any(String), expect.any(String), expect.objectContaining({ attachments: [blob] }));
     expect(r.log.mock.calls.flat().join(' ')).not.toContain('123:token');
+  });
+  it('passes photos as inlineImages to Gmail without ordinary attachments', () => {
+    const r = install(); r.h.command('/addmapping @news a@example.com');
+    r.h.post('Photo caption', { photo: [{ file_id: 'photo', file_size: 3, width: 100, height: 100 }] });
+    r.h.mutate(s => { s.batches[0].openedAt = Date.now() - 120_000; });
+    const blob = { setName: vi.fn(), getBytes: () => [1, 2, 3] };
+    blob.setName.mockReturnValue(blob);
+    r.fetch.mockImplementation(url => {
+      if (url.endsWith('/getFile')) return response({ ok: true, result: { file_path: 'photos/file.jpg', file_size: 3 } });
+      if (url.includes('/file/bot')) return { getResponseCode: () => 200, getBlob: () => blob } as unknown as ReturnType<typeof response>;
+      return response({ ok: true, result: true });
+    });
+    flushPending();
+    expect(GmailApp.sendEmail).toHaveBeenCalledWith(expect.any(String), expect.stringContaining('Photo caption'), expect.any(String), expect.objectContaining({
+      attachments: [], inlineImages: { photo_2_2: blob }, htmlBody: expect.stringContaining('src="cid:photo_2_2"'),
+    }));
   });
 });

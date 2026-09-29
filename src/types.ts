@@ -60,12 +60,13 @@ export interface Properties {
   deleteProperty(key: string): unknown;
 }
 export interface Attachment { name: string; size: number; blob: GoogleAppsScript.Base.BlobSource }
-export interface Email { to: string; subject: string; text: string; html: string; attachments: Attachment[] }
+export interface Email { to: string; subject: string; text: string; html: string; attachments: Attachment[]; inlineImages: Record<string, Attachment> }
 export type Buttons = Array<Array<{ text: string; callback_data: string }>>;
 export interface Ports {
   properties: Properties;
   locked<T>(action: () => T): T;
   now(): number;
+  formatTimestamp(timestamp: number): string;
   uuid(): string;
   telegram<T>(method: string, payload?: Record<string, unknown>): T;
   download(file: FileInfo, name: string): Attachment;

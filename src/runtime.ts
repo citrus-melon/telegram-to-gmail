@@ -1,6 +1,7 @@
 import { BotService } from './bot';
 import { FILE_BUDGET } from './forwarding';
 import type { Attachment, FileInfo, Ports } from './types';
+export { projectDetails } from './project';
 
 function telegram<T>(method: string, payload: Record<string, unknown> = {}): T {
   const token = PropertiesService.getScriptProperties().getProperty('BOT_TOKEN');
@@ -40,11 +41,16 @@ function ports(): Ports {
       try { return action(); } finally { lock.releaseLock(); }
     },
     now: () => Date.now(),
+    formatTimestamp: timestamp => Utilities.formatDate(new Date(timestamp * 1000), Session.getScriptTimeZone(), 'MMM d, yyyy, h:mm a z'),
     uuid: () => Utilities.getUuid(),
     telegram,
     download,
     send(email) {
-      GmailApp.sendEmail(email.to, email.subject, email.text, { htmlBody: email.html, attachments: email.attachments.map(a => a.blob) });
+      GmailApp.sendEmail(email.to, email.subject, email.text, {
+        htmlBody: email.html,
+        attachments: email.attachments.map(a => a.blob),
+        inlineImages: Object.fromEntries(Object.entries(email.inlineImages).map(([key, image]) => [key, image.blob])),
+      });
     },
     log(event, details = {}) { console.log(JSON.stringify({ event, ...details })); },
     ensureTrigger() {

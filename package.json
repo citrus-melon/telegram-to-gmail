@@ -1,5 +1,6 @@
 {
   "name": "telegram-to-gmail",
+  "description": "Telegram channel forwarding through Gmail on Google Apps Script",
   "version": "0.1.0",
   "private": true,
   "type": "module",

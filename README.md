@@ -4,8 +4,10 @@ A webhook-based Telegram bot hosted entirely in Google Apps Script. It forwards 
 
 ## Features
 ### Rich Message Mapping
-* Best-effort mapping of rich text formatting and common non-interactive attachment types
+* Best-effort mapping of rich text formatting, inline images, and attachments
 * Explicit notices for unsupported or unavailable content.
+* Message text in subject line
+* Channel name/timestamp and link to original message in footer
 * One-minute collection windows per channel to combine message bursts and prevent email spam.
 * Best-effort delivery, with 1-2 minute delay
 
@@ -50,7 +52,7 @@ You need Node.js 22 or newer, pnpm 9.10.0, a Google account with Gmail and Apps 
    | `INITIAL_ADMIN_ID` | Your numeric Telegram user ID, not your username |
    | `WEB_APP_URL` | `https://script.google.com/macros/s/DEPLOYMENT_ID/exec`, without query parameters |
 
-4. Run `setup` in the Apps Script editor as the deploying account. Authorize Gmail, outbound HTTP requests, and trigger management.
+4. Run `setup` in the Apps Script editor as the deploying account. Authorize Gmail, outbound HTTP requests, and trigger management. Timestamps follow the Apps Script project time zone. The manifest defaults to `Etc/UTC`; change `timeZone` in the local `appsscript.json` and redeploy to persist your preference across uploads. Changing the time zone only in the editor can be overwritten by a later upload.
 
 5. Open a private chat with the bot and send `/start`. Add the bot to each source channel (usually as an administrator). Use `/channels` after a channel membership update or post, or enter a channel ID/public username:
 
@@ -69,7 +71,7 @@ All configuration is restricted to authorized admins in private chats. Every adm
 
 | Command | Action |
 | --- | --- |
-| `/start`, `/help` | Show usage |
+| `/start`, `/help` | Show usage and project/version information, with revision and repository URL when available |
 | `/status` | Forwarding state, mapping/admin counts, pending batches |
 | `/channels` | Browse channels and select one for mapping instructions |
 | `/mappings` | Browse mappings and their independent IDs |
@@ -85,7 +87,7 @@ Lists use Previous/Next buttons. Removal confirmations expire after five minutes
 
 ## Limits and troubleshooting
 
-The bot downloads the largest photo variant or a document during delivery. It uses a 20 MiB aggregate attachment budget and at most 250 attachments per email, subject to Telegram's own download limit. Unsupported, oversized, and failed attachments receive omission notices while text/captions and source links are retained. Long bodies split into multiple emails to preserve text. [Telegram file downloads](https://core.telegram.org/bots/api#file) and [Apps Script quotas](https://developers.google.com/apps-script/guides/services/quotas) impose additional limits.
+The bot displays the largest Telegram photo variant inline in the HTML email. Documents remain attachments, including images sent as files. Photos also have a short description in the plain-text body. Inline images and ordinary attachments share a 20 MiB aggregate budget and a limit of 250 files per email, subject to Telegram's own download limit. Unsupported, oversized, and failed files receive omission notices while text/captions and source links are retained. Long bodies split into multiple emails to preserve text. [Telegram file downloads](https://core.telegram.org/bots/api#file) and [Apps Script quotas](https://developers.google.com/apps-script/guides/services/quotas) impose additional limits.
 
 Check **Executions** for structured events such as `update_failed`, `configuration_save_failed`, `content_omitted`, `email_failed`, and `email_sent`. Logs contain identifiers and outcomes, without credentials or full message bodies. A completed execution can still contain logged delivery failures. Failed recipients and claimed batches are not retried.
 
@@ -104,7 +106,7 @@ pnpm test
 pnpm build
 ```
 
-The build produces `dist/Code.js` and `dist/appsscript.json`, then verifies that the bundle loads without Node globals and exposes Apps Script entrypoints. Tests inject mocked Google and Telegram services. See [architecture](dev-docs/architecture.md) and [requirements](dev-docs/requirements.md).
+The build produces `dist/Code.js` and `dist/appsscript.json`, then verifies that the bundle loads without Node globals, exposes Apps Script entrypoints, and shares project information between its leading comment and bot help. Metadata comes from package name/description/version and the available Git revision. The repository URL comes from `package.json`'s `repository` field, then Git origin; unavailable fields are omitted. Credentials, query parameters, fragments, and filesystem remotes are excluded. Builds also work without Git. Edit the source rather than emitted code. Tests inject mocked Google and Telegram services. See [architecture](dev-docs/architecture.md) and [requirements](dev-docs/requirements.md).
 
 To update an existing deployment while retaining its URL:
 
@@ -128,7 +130,7 @@ Upload alone updates editor code; the versioned Web App needs redeployment. Reru
 Developers can use the following checks with a controlled channel and recipient to exercise a deployed bot, for example after changing webhook handling or forwarding behavior:
 
 1. Verify `/start`, `/status`, and button navigation in an admin's private chat. Verify another user and a group chat cannot configure the bot.
-2. Add a mapping; post formatted text with emoji, a photo, and a document within a minute. Verify text order, attachments, source links, UTC timestamps, and one collected email per mapping.
+2. Add a mapping; post multiline text with emoji, a photo, and an image sent as a document within a minute. Check the subject preview, text order, inline photo, attached document, source links, script-time-zone timestamps, and one collected email per mapping.
 3. Post unsupported content and verify an omission notice. Add an identical mapping and verify two independent emails for the next batch.
 4. Remove one duplicate with confirmation. Verify `/cancel`, last-admin protection, and `/off` discarding pending/new posts.
 5. Run `webhookStatus`: pending updates should drain and the error timestamp should not keep advancing. Repeated Telegram delivery should not repeat mutations or emails within the deduplication window.

@@ -36,6 +36,7 @@ export function harness() {
     properties,
     locked(action) { lockDepth++; try { return action(); } finally { lockDepth--; } },
     now: () => now,
+    formatTimestamp: vi.fn(() => 'Jan 1, 1970, 12:00 AM UTC'),
     uuid: () => `id-${++serial}`,
     telegram: <T>(method: string, payload?: Record<string, unknown>) => api(method, payload) as T,
     download: vi.fn((file, name) => {

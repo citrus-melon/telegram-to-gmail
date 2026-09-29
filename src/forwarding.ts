@@ -74,11 +74,41 @@ export function formatted(post: Post, ports: Pick<Ports, 'log'>): string {
   }
 }
 
-interface Part { text: string; html: string; attachments: Attachment[] }
+interface Part { text: string; html: string; attachments: Attachment[]; inlineImages: Record<string, Attachment> }
+
+function files(part: Part): Attachment[] { return [...part.attachments, ...Object.values(part.inlineImages)]; }
+function imageHtml(images: Part['inlineImages']): string {
+  return Object.entries(images).map(([key, image]) => `<div><img src="cid:${key}" alt="${escapeHtml(image.name)}" style="max-width:100%;height:auto"></div>`).join('');
+}
+
+function subjectText(text: string): string {
+  return text.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+function truncate(text: string, limit: number): string {
+  // Use code points to avoid splitting surrogate pairs; also keep the UTF-16 length within the limit.
+  if (text.length <= limit) return text;
+  let result = '';
+  for (const char of text) {
+    if (result.length + char.length > limit - 1) break;
+    result += char;
+  }
+  return result + '…';
+}
+
+function subject(posts: Post[], part: number, total: number): string {
+  const channel = truncate(subjectText(posts[0]?.channel.title || 'Telegram') || 'Telegram', 60);
+  const line = posts.flatMap(post => post.text.split(/\r\n|[\n\r\u2028\u2029]/)).map(subjectText).find(Boolean);
+  const count = `${posts.length} post${posts.length === 1 ? '' : 's'}`;
+  const suffix = total > 1 ? ` (${part}/${total})` : '';
+  if (!line) return `${channel} — ${count}${suffix}`;
+  const ending = `${count}${suffix} in ${channel}`;
+  return `${truncate(line, 200 - channel.length - 3 - ending.length)} — ${ending}`;
+}
 
 function renderPost(post: Post, ports: Ports, remainingBytes: number, remainingSlots: number): Part {
   const notices = [...post.omissions];
   const attachments: Attachment[] = [];
+  const inlineImages: Part['inlineImages'] = {};
   const file = post.file;
   if (file) {
     const name = (file.file_name || `document-${post.messageId}`).replace(/[\r\n\u0000]/g, '_');
@@ -90,6 +120,7 @@ function renderPost(post: Post, ports: Ports, remainingBytes: number, remainingS
       try {
         const attachment = ports.download(file, name);
         if (attachment.size > remainingBytes || attachment.size > FILE_BUDGET) notices.push(`Omitted attachment ${name}: exceeds the download or email attachment budget.`);
+        else if (file.kind === 'photo') inlineImages[`photo_${post.updateId}_${post.messageId}`] = attachment;
         else attachments.push(attachment);
       } catch {
         notices.push(`Omitted attachment ${name}: download unavailable.`);
@@ -97,52 +128,62 @@ function renderPost(post: Post, ports: Ports, remainingBytes: number, remainingS
     }
   }
   if (notices.length) ports.log('content_omitted', { updateId: post.updateId, count: notices.length });
-  const footer = `${post.channel.title} · ${new Date(post.date * 1000).toISOString()}\n${sourceLink(post)}`;
-  const text = [post.text, ...notices, footer].filter(Boolean).join('\n\n');
+  const timestamp = ports.formatTimestamp(post.date);
+  const footer = `${post.channel.title} · ${timestamp}\n${sourceLink(post)}`;
+  const photoDescriptions = Object.values(inlineImages).map(image => `Photo: ${image.name} (shown in the HTML email).`);
+  const text = [post.text, ...photoDescriptions, ...notices, footer].filter(Boolean).join('\n\n');
   const link = sourceLink(post);
-  const html = `<div>${formatted(post, ports)}</div>${notices.map(n => `<p>${escapeHtml(n)}</p>`).join('')}<p><small>${escapeHtml(post.channel.title)} · ${new Date(post.date * 1000).toISOString()}<br>${safeLink(link) ? `<a href="${escapeHtml(link)}">View source post</a>` : escapeHtml(link)}</small></p>`;
-  return { text, html, attachments };
+  const html = `<div>${formatted(post, ports)}</div>${imageHtml(inlineImages)}${notices.map(n => `<p>${escapeHtml(n)}</p>`).join('')}<p><small>${escapeHtml(post.channel.title)} · ${escapeHtml(timestamp)}<br>${safeLink(link) ? `<a href="${escapeHtml(link)}">View source post</a>` : escapeHtml(link)}</small></p>`;
+  return { text, html, attachments, inlineImages };
 }
 
 export function deliver(batch: Batch, recipients: Array<{ id: string; recipient: string }>, ports: Ports): void {
   const parts: Part[] = [];
-  let current: Part = { text: '', html: '', attachments: [] };
+  let current: Part = { text: '', html: '', attachments: [], inlineImages: {} };
   let usedBytes = 0;
   const push = () => {
     if (current.text || current.html) parts.push(current);
-    current = { text: '', html: '', attachments: [] }; usedBytes = 0;
+    current = { text: '', html: '', attachments: [], inlineImages: {} }; usedBytes = 0;
   };
-  for (const post of [...batch.posts].sort((a, b) => a.messageId - b.messageId)) {
+  const posts = [...batch.posts].sort((a, b) => a.messageId - b.messageId);
+  for (const post of posts) {
     // Render before fetching so body-driven splits reset the attachment budget without re-downloading.
     const preview = `<div>${formatted(post, ports)}</div>${escapeHtml(post.text)}${escapeHtml(post.channel.title)}`;
     if (current.html && byteLength(current.html) + byteLength(preview) + 3000 > BODY_BUDGET) push();
-    const part = renderPost(post, ports, FILE_BUDGET - usedBytes, 250 - current.attachments.length);
+    const part = renderPost(post, ports, FILE_BUDGET - usedBytes, 250 - files(current).length);
     if (byteLength(part.html) > BODY_BUDGET || byteLength(part.text) > BODY_BUDGET) {
       // Telegram posts are normally much smaller. Preserve unusually large text using escaped plain-text segments.
       const segments: string[] = [];
       let segment = '', bytes = 0;
+      const imagesHtml = imageHtml(part.inlineImages);
+      // Reserve the photo markup on the first segment so oversized-post fallback retains its images.
+      const segmentBudget = Math.max(1, BODY_BUDGET - 1000 - byteLength(imagesHtml));
       for (const char of part.text) {
         const weight = byteLength(escapeHtml(char));
-        if (bytes + weight > BODY_BUDGET - 1000) { segments.push(segment); segment = ''; bytes = 0; }
+        if (bytes + weight > segmentBudget) { segments.push(segment); segment = ''; bytes = 0; }
         segment += char; bytes += weight;
       }
       if (segment) segments.push(segment);
       push();
-      segments.forEach((text, i) => parts.push({ text, html: `<pre>${escapeHtml(text)}</pre>`, attachments: i === 0 ? part.attachments : [] }));
+      segments.forEach((text, i) => parts.push({
+        text, html: `<pre>${escapeHtml(text)}</pre>${i === 0 ? imagesHtml : ''}`,
+        attachments: i === 0 ? part.attachments : [], inlineImages: i === 0 ? part.inlineImages : {},
+      }));
       continue;
     }
     if (current.html && (byteLength(current.html) + byteLength(part.html) + 10 > BODY_BUDGET || byteLength(current.text) + byteLength(part.text) + 10 > BODY_BUDGET)) push();
-    current.text += (current.text ? '\n\n---\n\n' : '') + part.text;
-    current.html += (current.html ? '<hr>' : '') + part.html;
+    current.text += (current.text ? '\n\n' : '') + part.text;
+    current.html += part.html;
     current.attachments.push(...part.attachments);
-    usedBytes += part.attachments.reduce((sum, a) => sum + a.size, 0);
+    Object.assign(current.inlineImages, part.inlineImages);
+    usedBytes += files(part).reduce((sum, a) => sum + a.size, 0);
   }
   push();
   for (const mapping of recipients) {
     parts.forEach((part, i) => {
       const email: Email = {
         to: mapping.recipient,
-        subject: `${batch.posts[0]?.channel.title || 'Telegram'} — ${batch.posts.length} post${batch.posts.length === 1 ? '' : 's'}${parts.length > 1 ? ` (${i + 1}/${parts.length})` : ''}`.replace(/[\r\n]/g, ' ').slice(0, 200),
+        subject: subject(posts, i + 1, parts.length),
         ...part,
       };
       try {

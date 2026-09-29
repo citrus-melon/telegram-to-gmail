@@ -1,6 +1,7 @@
 import { channelFrom, deliver, normalize, WINDOW_MS } from './forwarding';
 import { StateStore } from './storage';
 import type { Batch, Buttons, Channel, Chat, Ports, State, Update } from './types';
+import { projectDetails } from './project';
 
 const COMMANDS = [
   ['start', 'Show help'], ['help', 'Show commands'], ['status', 'Show configuration status'],
@@ -191,7 +192,7 @@ export class BotService {
   }
 
   private command(state: State, admin: string, name: string | undefined, args: string[], prepared: Prepared): Reply {
-    if (['start', 'help'].includes(name || '')) return { text: HELP };
+    if (['start', 'help'].includes(name || '')) return { text: `${HELP}\n\n${projectDetails()}` };
     if (name === 'status') return { text: `Forwarding: ${state.enabled ? 'on' : 'off'}\nMappings: ${state.mappings.length}\nAdmins: ${state.admins.length}\nPending batches: ${state.batches.length}` };
     if (name === 'channels') return this.list(state, 'c', 0);
     if (name === 'mappings') return this.list(state, 'm', 0);
