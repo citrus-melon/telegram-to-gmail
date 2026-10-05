@@ -76,6 +76,8 @@ pnpm clasp update-deployment DEPLOYMENT_ID --description "Bot update"
 
 Upload alone updates editor code; redeploy to update the running bot. Rerun `setup` after command/subscription changes or replacing the URL. Use the same Google account for setup and updates so it can manage the bot's triggers.
 
+When updating from the GmailApp sender to the Unicode-safe MailApp sender, run `setup` in the Apps Script editor after upload and authorize the new send-mail permission before redeploying.
+
 ## Bot commands
 
 Configuration is available only to authorized admins in private chats. All admins have equal permissions; new admins must open their own private chat with the bot.

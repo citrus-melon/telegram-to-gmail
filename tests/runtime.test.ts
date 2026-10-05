@@ -23,7 +23,7 @@ function install() {
   vi.stubGlobal('Utilities', { getUuid: h.ports.uuid, formatDate });
   vi.stubGlobal('Session', { getScriptTimeZone: () => 'America/Los_Angeles' });
   vi.stubGlobal('UrlFetchApp', { fetch });
-  vi.stubGlobal('GmailApp', { sendEmail: vi.fn() });
+  vi.stubGlobal('MailApp', { sendEmail: vi.fn() });
   vi.stubGlobal('ScriptApp', {
     getProjectTriggers: () => [...triggers],
     deleteTrigger: (t: Trigger) => triggers.splice(triggers.indexOf(t), 1),
@@ -41,6 +41,25 @@ function response(data: unknown, status = 200) {
 }
 
 describe('Apps Script runtime adapters', () => {
+  it('preserves Unicode from webhook JSON through stored state to MailApp', () => {
+    const r = install(); r.h.command('/addmapping @news a@example.com');
+    const text = 'Unicode 🥺';
+    const title = 'News 🎉 漢字';
+    doPost({
+      parameter: { secret: r.h.properties.getProperty('WEBHOOK_SECRET')! },
+      postData: { contents: JSON.stringify({ update_id: 20, channel_post: {
+        message_id: 20, date: 10, chat: { id: -10012345, type: 'channel', title }, text,
+        entities: [{ type: 'bold', offset: 8, length: 2 }],
+      } }) },
+    } as unknown as GoogleAppsScript.Events.DoPost);
+    expect(r.h.store.read()!.batches[0].posts[0].text).toBe(text);
+    r.h.mutate(s => { s.batches[0].openedAt = Date.now() - 120_000; });
+    flushPending();
+    expect(MailApp.sendEmail).toHaveBeenCalledExactlyOnceWith(
+      'a@example.com', `${text} — 1 post in ${title}`,
+      expect.stringContaining(text), expect.objectContaining({ htmlBody: expect.stringContaining('Unicode <b>🥺</b>') }),
+    );
+  });
   it('setup clears abandoned flush triggers without scheduling idle work and preserves unrelated triggers', () => {
     const r = install(); setup(); setup();
     expect(r.triggers.filter(t => t.getHandlerFunction() === 'flushPending')).toHaveLength(0);
@@ -57,7 +76,7 @@ describe('Apps Script runtime adapters', () => {
     const id = r.triggers.find(t => t.getHandlerFunction() === 'flushPending')!.getUniqueId();
     r.h.mutate(s => { s.batches[0].openedAt = Date.now() - 120_000; });
     flushPending({ triggerUid: id });
-    expect(GmailApp.sendEmail).toHaveBeenCalledTimes(1);
+    expect(MailApp.sendEmail).toHaveBeenCalledTimes(1);
     expect(r.triggers.filter(t => t.getHandlerFunction() === 'flushPending')).toHaveLength(0);
     expect(r.h.properties.getProperty('FLUSH_SCHEDULE')).toBeNull();
   });
@@ -75,14 +94,14 @@ describe('Apps Script runtime adapters', () => {
     expect(() => setup()).toThrow('Telegram getMe failed');
     try { setup(); } catch (error) { expect(String(error)).not.toContain('botSECRET'); }
   });
-  it('sends Gmail through the runtime and exposes recovery', () => {
+  it('sends email through the runtime and exposes recovery', () => {
     const r = install(); r.h.command('/addmapping @news a@example.com');
     r.h.post('hello');
     r.h.mutate(s => { s.batches[0].openedAt = Date.now() - 120_000; });
     flushPending();
-    expect(GmailApp.sendEmail).toHaveBeenCalledWith('a@example.com', expect.any(String), expect.stringContaining('hello'), expect.objectContaining({ htmlBody: expect.stringContaining('View source post') }));
+    expect(MailApp.sendEmail).toHaveBeenCalledWith('a@example.com', expect.any(String), expect.stringContaining('hello'), expect.objectContaining({ htmlBody: expect.stringContaining('View source post') }));
     expect(r.formatDate).toHaveBeenCalledWith(new Date(10_000), 'America/Los_Angeles', 'MMM d, yyyy, h:mm a z');
-    expect(GmailApp.sendEmail).toHaveBeenCalledWith(expect.any(String), expect.any(String), expect.stringContaining('Sep 28, 2026, 2:30 PM PDT'), expect.objectContaining({ htmlBody: expect.stringContaining('Sep 28, 2026, 2:30 PM PDT') }));
+    expect(MailApp.sendEmail).toHaveBeenCalledWith(expect.any(String), expect.any(String), expect.stringContaining('Sep 28, 2026, 2:30 PM PDT'), expect.objectContaining({ htmlBody: expect.stringContaining('Sep 28, 2026, 2:30 PM PDT') }));
     r.h.mutate(s => { s.admins = ['43']; }); recoverAdmin();
     expect(r.h.store.read()?.admins).toEqual(['43', '42']);
   });
@@ -99,10 +118,10 @@ describe('Apps Script runtime adapters', () => {
     });
     flushPending();
     expect(blob.setName).toHaveBeenCalledWith('report.pdf');
-    expect(GmailApp.sendEmail).toHaveBeenCalledWith(expect.any(String), expect.any(String), expect.any(String), expect.objectContaining({ attachments: [blob] }));
+    expect(MailApp.sendEmail).toHaveBeenCalledWith(expect.any(String), expect.any(String), expect.any(String), expect.objectContaining({ attachments: [blob] }));
     expect(r.log.mock.calls.flat().join(' ')).not.toContain('123:token');
   });
-  it('passes photos as inlineImages to Gmail without ordinary attachments', () => {
+  it('passes photos as inlineImages to MailApp without ordinary attachments', () => {
     const r = install(); r.h.command('/addmapping @news a@example.com');
     r.h.post('Photo caption', { photo: [{ file_id: 'photo', file_size: 3, width: 100, height: 100 }] });
     r.h.mutate(s => { s.batches[0].openedAt = Date.now() - 120_000; });
@@ -114,7 +133,7 @@ describe('Apps Script runtime adapters', () => {
       return response({ ok: true, result: true });
     });
     flushPending();
-    expect(GmailApp.sendEmail).toHaveBeenCalledWith(expect.any(String), expect.stringContaining('Photo caption'), expect.any(String), expect.objectContaining({
+    expect(MailApp.sendEmail).toHaveBeenCalledWith(expect.any(String), expect.stringContaining('Photo caption'), expect.any(String), expect.objectContaining({
       attachments: [], inlineImages: { photo_2_2: blob }, htmlBody: expect.stringContaining('src="cid:photo_2_2"'),
     }));
   });

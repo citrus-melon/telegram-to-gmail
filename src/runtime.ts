@@ -47,7 +47,8 @@ function ports(): Ports {
     telegram,
     download,
     send(email) {
-      GmailApp.sendEmail(email.to, email.subject, email.text, {
+      // Google recommends MailApp for Unicode/emoji; GmailApp can corrupt surrogate pairs.
+      MailApp.sendEmail(email.to, email.subject, email.text, {
         htmlBody: email.html,
         attachments: email.attachments.map(a => a.blob),
         inlineImages: Object.fromEntries(Object.entries(email.inlineImages).map(([key, image]) => [key, image.blob])),

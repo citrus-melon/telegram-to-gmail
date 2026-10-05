@@ -34,6 +34,8 @@ Chunks are at most 7,500 UTF-8 bytes. Under a script lock, the storage helper re
 
 ## Collection and email
 
+Email uses `MailApp.sendEmail` with the `script.send_mail` scope, retaining HTML, plain text, inline images, and attachments. Google [recommends MailApp for Unicode and emoji](https://developers.google.com/apps-script/samples/automations/mail-merge#apps_script_services); `GmailApp.sendEmail` can corrupt these characters. The bot does not require Gmail inbox access.
+
 The first mapped channel post opens a fixed 60-second window measured at receipt. Subsequent posts inside it join the batch; posts at or after the boundary start another. This reduces spam without album-specific state or text suppression. Telegram UI groups may cross boundaries.
 
 Pending posts store text/captions, entities, timestamps, source/channel metadata, file IDs/metadata, and omission notices. File bytes are never stored in Properties. Discovery continues while off; incoming content is discarded. `/off` clears pending batches.
